@@ -1,0 +1,113 @@
+@page "/page2"
+@rendermode InteractiveServer
+
+<h3>Charts Demo</h3>
+
+<button @onclick="RandomizeData">Randomize Data</button>
+<button @onclick="AddBar">Add Bar</button>
+@if (chartData.Count > 2)
+{
+    <button @onclick="RemoveBar">Remove Bar</button>
+}
+
+<br />
+<br />
+
+<div style="position: relative; width: 600px; height: 320px;">
+    <svg width="600" height="320">
+        <!-- Y axis -->
+        <line x1="50" y1="10" x2="50" y2="260" stroke="gray" stroke-width="1" />
+        <!-- X axis -->
+        <line x1="50" y1="260" x2="580" y2="260" stroke="gray" stroke-width="1" />
+
+        <!-- Grid lines -->
+        @for (int g = 0; g <= 4; g++)
+        {
+            var y = 260 - (g * 62);
+            <line x1="50" y1="@y" x2="580" y2="@y" stroke="lightgray" stroke-width="0.5" />
+        }
+
+        <!-- Bars -->
+        @for (int i = 0; i < chartData.Count; i++)
+        {
+            var item = chartData[i];
+            var barWidth = Math.Max(20, Math.Min(60, 500.0 / chartData.Count - 10));
+            var gap = (530.0 - barWidth * chartData.Count) / (chartData.Count + 1);
+            var x = 50 + gap + i * (barWidth + gap);
+            var barHeight = item.Value * 2.48;
+            var y = 260 - barHeight;
+
+            <rect x="@x" y="@y" width="@barWidth" height="@barHeight"
+                  fill="@colors[i % colors.Length]" rx="3" />
+        }
+    </svg>
+
+    <!-- Labels using HTML positioned over the SVG -->
+    @for (int g = 0; g <= 4; g++)
+    {
+        var y = 260 - (g * 62);
+        <span style="position:absolute; left:0; top:@(y - 6)px; width:45px; text-align:right; font-size:11px; color:gray;">
+            @(g * 25)%
+        </span>
+    }
+
+    @for (int i = 0; i < chartData.Count; i++)
+    {
+        var item = chartData[i];
+        var barWidth = Math.Max(20, Math.Min(60, 500.0 / chartData.Count - 10));
+        var gap = (530.0 - barWidth * chartData.Count) / (chartData.Count + 1);
+        var x = 50 + gap + i * (barWidth + gap);
+        var barHeight = item.Value * 2.48;
+        var y = 260 - barHeight;
+
+        <span style="position:absolute; left:@(x)px; top:@(y - 20)px; width:@(barWidth)px; text-align:center; font-size:12px; font-weight:bold;">
+            @item.Value%
+        </span>
+        <span style="position:absolute; left:@(x)px; top:270px; width:@(barWidth)px; text-align:center; font-size:11px; color:gray;">
+            @item.Label
+        </span>
+    }
+</div>
+
+@code {
+    private List<ChartItem> chartData = new()
+    {
+        new("Mon", 65),
+        new("Tue", 42),
+        new("Wed", 78),
+        new("Thu", 55),
+        new("Fri", 90),
+    };
+
+    private string[] colors = { "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899" };
+    private Random rng = new();
+
+    private void RandomizeData()
+    {
+        foreach (var item in chartData)
+            item.Value = rng.Next(10, 100);
+    }
+
+    private void AddBar()
+    {
+        if (chartData.Count < 10)
+        {
+            var names = new[] { "Sat", "Sun", "Mon2", "Tue2", "Wed2" };
+            var index = chartData.Count - 5;
+            chartData.Add(new ChartItem(names[Math.Min(index, names.Length - 1)], rng.Next(20, 90)));
+        }
+    }
+
+    private void RemoveBar()
+    {
+        if (chartData.Count > 2)
+            chartData.RemoveAt(chartData.Count - 1);
+    }
+
+    public class ChartItem
+    {
+        public string Label { get; set; }
+        public int Value { get; set; }
+        public ChartItem(string label, int value) { Label = label; Value = value; }
+    }
+}

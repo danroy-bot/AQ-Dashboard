@@ -1,0 +1,526 @@
+@page "/mapview"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IJSRuntime JS
+@inject AQ_Dashboard.Services.AppConfig Config
+@using AQ_Dashboard.Services
+
+<div style="display: flex; flex-direction: column; height: calc(100vh - 70px); overflow: hidden;">
+
+    <!-- Header -->
+    <h3 style="color: #758A64; font-weight: bold; font-size: 18px; margin: 0 0 2px 0;">Map View - Accidental Pollution Release Episode Simulation</h3>
+    <p style="font-size: 12px; color: #6c757d; margin: 0 0 4px 0;">
+        Example simulation analysis for an accidental release episode, with hourly playback and wind rose analysis.
+    </p>
+
+    <!-- CONTROLS ROW -->
+    <div style="display: flex; align-items: center; padding: 4px 0; font-size: 13px; width: 100%;">
+
+        <!-- Pollutant Selection -->
+        <div style="flex: 2; padding-right: 15px;">
+            <div style="font-weight: 600; margin-bottom: 2px;">Pollutant</div>
+            <div style="display: flex; gap: 10px;">
+                @foreach (var p in pollutants)
+                {
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer;">
+                        <input type="radio" name="pollutantGroup"
+                               checked="@(selectedPollutant == p)"
+                               @onchange="() => SelectPollutant(p)" />
+                        <strong>@PollutantFormatter.Format(p)</strong>
+                    </label>
+                }
+            </div>
+        </div>
+
+        <div style="width: 1px; background: #ccc; align-self: stretch;"></div>
+
+        <!-- Result Type -->
+        <div style="flex: 1.5; padding: 0 15px;">
+            <div style="font-weight: 600; margin-bottom: 2px;">Result Type</div>
+            <div style="display: flex; gap: 12px;">
+                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer;">
+                    <input type="radio" name="resultType"
+                           checked="@(resultType == "Max")"
+                           @onchange="OnSelectMax" />
+                    <strong>Max Contour</strong>
+                </label>
+                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer;">
+                    <input type="radio" name="resultType"
+                           checked="@(resultType == "Hourly")"
+                           @onchange="OnSelectHourly" />
+                    <strong>Hourly Contour</strong>
+                </label>
+            </div>
+        </div>
+
+        <div style="width: 1px; background: #ccc; align-self: stretch;"></div>
+
+        <!-- Max Grid Values -->
+        <div style="flex: 2; padding: 0 15px;">
+            <div style="font-weight: 600; margin-bottom: 2px;">Max Grid Values</div>
+            <div style="display: flex; gap: 16px;">
+                @for (int i = 0; i < pollutants.Length; i++)
+                {
+                    <div style="text-align: center;">
+                        <div style="font-size: 12px; font-weight: bold;">@PollutantFormatter.Format(pollutants[i])</div>
+                        <div style="font-size: 9px; color: gray; font-style: italic;">@maxValues[i]</div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="flex: 1.5; display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-left: 15px;">
+            <button @onclick="ResetMap"
+                    @onmouseover="() => resetHover = true"
+                    @onmouseout="() => resetHover = false"
+                    style="background: @(resetHover ? "#555" : "#6c757d"); color: white; border: none;
+                padding: 8px 20px; font-size: 13px; font-weight: bold; cursor: pointer;
+                border-radius: 4px; white-space: nowrap; transition: background 0.2s;">
+                Reset Map
+            </button>
+        </div>
+    </div>
+
+    <hr style="margin: 4px 0;" />
+
+    <!-- MAP DISPLAY -->
+    <div id="mapDisplay" style="flex: 1; min-height: 600px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <!-- PLAYBACK CONTROLS -->
+    <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0;">
+        <button @onclick="PreviousFrame" disabled="@(!playbackEnabled)"
+                style="width: 40px; height: 36px; font-size: 16px; border: 1px solid #ccc;
+            background: white; border-radius: 4px;
+            cursor: @(playbackEnabled ? "pointer" : "not-allowed");
+            opacity: @(playbackEnabled ? "1" : "0.4");"
+                title="Previous">
+            &#9198;
+        </button>
+        <button @onclick="PlayPause" disabled="@(!playbackEnabled)"
+                style="width: 40px; height: 36px; font-size: 16px; border: 1px solid #ccc;
+            background: @(isPlaying ? "#3F93B1" : "white");
+            color: @(isPlaying ? "white" : "black"); border-radius: 4px;
+            cursor: @(playbackEnabled ? "pointer" : "not-allowed");
+            opacity: @(playbackEnabled ? "1" : "0.4");"
+                title="Play/Pause">
+            @(isPlaying ? "||" : ">")
+        </button>
+        <button @onclick="ToggleLoop" disabled="@(!playbackEnabled)"
+                style="width: 50px; height: 36px; font-size: 12px; font-weight: 600; border: 1px solid #ccc;
+            background: @(isLooping ? "#3F93B1" : "white");
+            color: @(isLooping ? "white" : "black"); border-radius: 4px;
+            cursor: @(playbackEnabled ? "pointer" : "not-allowed");
+            opacity: @(playbackEnabled ? "1" : "0.4");"
+                title="Loop">
+            Loop
+        </button>
+        <button @onclick="NextFrame" disabled="@(!playbackEnabled)"
+                style="width: 40px; height: 36px; font-size: 16px; border: 1px solid #ccc;
+            background: white; border-radius: 4px;
+            cursor: @(playbackEnabled ? "pointer" : "not-allowed");
+            opacity: @(playbackEnabled ? "1" : "0.4");"
+                title="Next">
+            &#9197;
+        </button>
+
+        <div style="width: 1px; height: 28px; background: #ccc; margin: 0 4px;"></div>
+
+        <div style="flex: 1; opacity: @(playbackEnabled ? "1" : "0.4");">
+            <input type="range" min="0" max="@maxSliderValue" value="@currentFrame"
+                   @onchange="OnSliderChange"
+                   disabled="@(!playbackEnabled)"
+                   style="width: 100%;" />
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #999; margin-top: -2px;">
+                <span>@firstHourLabel</span>
+                <span>@lastHourLabel</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup Message -->
+    @if (showPopup)
+    {
+        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center; z-index: 9999;"
+             @onclick="ClosePopup">
+            <div style="background: white; padding: 30px 40px; border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3); text-align: center; max-width: 400px;"
+                 @onclick:stopPropagation="true">
+                <h4 style="margin: 0 0 10px 0; color: #2c3e50;">Coming Soon</h4>
+                <p style="color: #666; margin: 0 0 20px 0;">@popupMessage</p>
+                <button @onclick="ClosePopup"
+                        style="background: #758A64; color: white; border: none; padding: 8px 24px;
+                    font-size: 14px; font-weight: 600; border-radius: 4px; cursor: pointer;">
+                    OK
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // Pollutant data
+    private string[] pollutants = { "PM10", "PM2.5", "SO2", "PAHs", "F" };
+    private string selectedPollutant = "PM10";
+    private string resultType = "Hourly";
+    private string[] maxValues = { "--", "--", "--", "--", "--" };
+    // Hover state for buttons
+    private bool resetHover = false;
+
+    // Popup state
+    private bool showPopup = false;
+    private string popupMessage = "";
+    private string popupTitle = "";
+
+    private Dictionary<string, string> hourlyPrefixes = new()
+    {
+        { "PM10", "1_AED_Timestep" }, { "PM2.5", "2_AED_Timestep" },
+        { "SO2", "3_AED_Timestep" }, { "PAHs", "4_AED_Timestep" }, { "F", "5_AED_Timestep" }
+    };
+    private Dictionary<string, string> maxPrefixes = new()
+    {
+        { "PM10", "1_AED_Max" }, { "PM2.5", "2_AED_Max" },
+        { "SO2", "3_AED_Max" }, { "PAHs", "4_AED_Max" }, { "F", "5_AED_Max" }
+    };
+
+    // Playback state
+    private bool playbackEnabled = true;
+    private bool isPlaying = false;
+    private bool isLooping = false;
+    private int currentFrame = 0;
+    private int maxSliderValue = 30;
+    private string firstHourLabel = "";
+    private string lastHourLabel = "";
+    private string statusMessage = "Ready";
+    private bool mapInitialized = false;
+
+    // Grid files for current selection
+    private string[] resultFiles = Array.Empty<string>();
+
+    // Playback timer
+    private System.Threading.Timer? playTimer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("isoplethMap.init", "mapDisplay");
+            mapInitialized = true;
+
+            if (Directory.Exists(Config.GridFolderPath))
+            {
+                GridLoader.PreloadMaxContourValues(Config.GridFolderPath);
+                UpdateMaxValues();
+
+                // Auto-select PM10 + Hourly Contour, starting at timestep index 4
+                selectedPollutant = "PM10";
+                resultType = "Hourly";
+                playbackEnabled = true;
+
+                await LoadContours(initialFrame: 4);
+                PlayPause();
+            }
+
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectPollutant(string pollutant)
+    {
+        selectedPollutant = pollutant;
+        StopPlayback();
+        await LoadContours();
+    }
+
+    private async Task OnSelectMax()
+    {
+        resultType = "Max";
+        playbackEnabled = false;
+        StopPlayback();
+        await LoadContours();
+    }
+
+    private async Task OnSelectHourly()
+    {
+        resultType = "Hourly";
+        playbackEnabled = true;
+        StopPlayback();
+        await LoadContours();
+    }
+
+    private async Task LoadContours(int initialFrame = 0)
+    {
+        if (!mapInitialized) return;
+
+        string prefix = resultType == "Hourly"
+            ? hourlyPrefixes[selectedPollutant]
+            : maxPrefixes[selectedPollutant];
+
+        if (!Directory.Exists(Config.GridFolderPath))
+        {
+            showPopup = true;
+            popupTitle = "Data Folder Not Found";
+            popupMessage = $"The grid data folder could not be found at:\n{Config.GridFolderPath}\n\nCheck the path in appsettings.json.";
+            return;
+        }
+
+        resultFiles = Directory.GetFiles(Config.GridFolderPath, $"{prefix}*.grd")
+                               .OrderBy(f => f).ToArray();
+
+        if (resultFiles.Length == 0)
+        {
+            showPopup = true;
+            popupTitle = "No Grid Files";
+            popupMessage = $"No grid files found for {selectedPollutant} ({resultType} Contour).\n\nLooking for: {prefix}*.grd";
+            return;
+        }
+
+        if (resultType == "Hourly")
+        {
+            maxSliderValue = resultFiles.Length - 1;
+            currentFrame = Math.Clamp(initialFrame, 0, maxSliderValue);
+            firstHourLabel = "Timestep 1";
+            lastHourLabel = $"Timestep {resultFiles.Length}";
+        }
+        else
+        {
+            firstHourLabel = "";
+            lastHourLabel = "";
+            currentFrame = 0;
+        }
+
+        await LoadGridAtIndex(currentFrame);
+    }
+
+    private async Task LoadGridAtIndex(int index)
+    {
+        if (resultFiles.Length == 0 || index < 0 || index >= resultFiles.Length) return;
+
+        try
+        {
+            // Load grid data using the existing C# parsing logic
+            string jsData = GridLoader.LoadGridFile(resultFiles[index], index);
+            await JS.InvokeVoidAsync("isoplethMap.addGridOverlay", jsData);
+
+            // Load windrose
+            await LoadWindrose(index);
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Error loading grid: {ex.Message}";
+        }
+    }
+
+    private async Task LoadWindrose(int fileIndex)
+    {
+        if (!File.Exists(Config.MetDataPath)) return;
+
+        try
+        {
+            bool isHourly = resultType == "Hourly";
+            int startHour = isHourly ? fileIndex / 12 : 0;
+
+            var speeds = new List<double>();
+            var directions = new List<double>();
+            int currentDataIndex = 0;
+
+            using (var reader = new StreamReader(Config.MetDataPath))
+            {
+                // Skip header lines
+                for (int i = 0; i < 4; i++) reader.ReadLine();
+
+                while (!reader.EndOfStream)
+                {
+                    var line = reader.ReadLine();
+                    var values = line?.Split(',');
+
+                    if (values != null && values.Length >= 5 &&
+                        !string.Equals(values[0], "aaaa", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(values[2]) && !string.IsNullOrWhiteSpace(values[4]))
+                            {
+                                if (isHourly)
+                                {
+                                    int startIndex = startHour * 12;
+                                    int endIndex = startIndex + 12;
+
+                                    if (currentDataIndex >= startIndex && currentDataIndex < endIndex)
+                                    {
+                                        speeds.Add(double.Parse(values[2], System.Globalization.CultureInfo.InvariantCulture));
+                                        directions.Add(double.Parse(values[4], System.Globalization.CultureInfo.InvariantCulture));
+                                    }
+                                    currentDataIndex++;
+                                }
+                                else
+                                {
+                                    speeds.Add(double.Parse(values[2], System.Globalization.CultureInfo.InvariantCulture));
+                                    directions.Add(double.Parse(values[4], System.Globalization.CultureInfo.InvariantCulture));
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            if (isHourly) currentDataIndex++;
+                        }
+                    }
+                }
+            }
+
+            if (speeds.Count > 0)
+            {
+                string windroseJson = WindroseDataLoader.GenerateWindroseJson(speeds, directions);
+                await JS.InvokeVoidAsync("isoplethMap.drawWindrose", windroseJson, isHourly);
+            }
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Windrose error: {ex.Message}";
+        }
+    }
+
+    private void UpdateMaxValues()
+    {
+        var cached = GridLoader.GetCachedMaxValues();
+        for (int i = 0; i < pollutants.Length; i++)
+        {
+            maxValues[i] = cached.ContainsKey(pollutants[i])
+                ? cached[pollutants[i]].ToString("G4")
+                : "--";
+        }
+    }
+
+    // Slider change
+    private async Task OnSliderChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int value))
+        {
+            currentFrame = value;
+            StopPlayback();
+            await LoadGridAtIndex(currentFrame);
+            statusMessage = $"Frame {currentFrame + 1} of {resultFiles.Length}";
+        }
+    }
+
+    // Playback controls
+    private async Task PreviousFrame()
+    {
+        StopPlayback();
+        if (currentFrame > 0)
+        {
+            currentFrame--;
+            await LoadGridAtIndex(currentFrame);
+            statusMessage = $"Frame {currentFrame + 1} of {resultFiles.Length}";
+        }
+    }
+
+    private async Task NextFrame()
+    {
+        StopPlayback();
+        if (currentFrame < maxSliderValue)
+        {
+            currentFrame++;
+            await LoadGridAtIndex(currentFrame);
+            statusMessage = $"Frame {currentFrame + 1} of {resultFiles.Length}";
+        }
+    }
+
+    private void PlayPause()
+    {
+        if (!isPlaying)
+        {
+            isPlaying = true;
+            isLooping = false;
+            StartTimer();
+        }
+        else
+        {
+            StopPlayback();
+        }
+    }
+
+    private void ToggleLoop()
+    {
+        if (!isLooping)
+        {
+            isLooping = true;
+            isPlaying = false;
+            StartTimer();
+        }
+        else
+        {
+            StopPlayback();
+        }
+    }
+
+    private void StartTimer()
+    {
+        playTimer?.Dispose();
+        playTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                if (currentFrame < maxSliderValue)
+                {
+                    currentFrame++;
+                    await LoadGridAtIndex(currentFrame);
+                    statusMessage = $"Playing: Frame {currentFrame + 1} of {resultFiles.Length}";
+                    StateHasChanged();
+                }
+                else if (isLooping)
+                {
+                    currentFrame = 0;
+                    await LoadGridAtIndex(currentFrame);
+                    statusMessage = $"Loop: Frame 1 of {resultFiles.Length}";
+                    StateHasChanged();
+                }
+                else
+                {
+                    StopPlayback();
+                    StateHasChanged();
+                }
+            });
+        }, null, 0, 1000);
+    }
+
+    private void StopPlayback()
+    {
+        isPlaying = false;
+        isLooping = false;
+        playTimer?.Dispose();
+        playTimer = null;
+    }
+
+    private async Task ResetMap()
+    {
+        StopPlayback();
+        await JS.InvokeVoidAsync("isoplethMap.clearAll");
+        await JS.InvokeVoidAsync("isoplethMap.resetView");
+        currentFrame = 0;
+
+        // Reload default contours like initial page load
+        if (Directory.Exists(Config.GridFolderPath))
+        {
+            GridLoader.PreloadMaxContourValues(Config.GridFolderPath);
+            UpdateMaxValues();
+        }
+
+        selectedPollutant = "PM10";
+        resultType = "Max";
+        playbackEnabled = false;
+
+        await LoadContours();
+    }
+
+    private void ClosePopup()
+    {
+        showPopup = false;
+    }
+
+    public void Dispose()
+    {
+        playTimer?.Dispose();
+    }
+}

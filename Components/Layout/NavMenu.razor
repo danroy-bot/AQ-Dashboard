@@ -1,0 +1,36 @@
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="" style="display: flex; align-items: center; gap: 10px;">
+            <img src="images/Nav_Logo.jpg" alt="Logo"
+                 style="max-height: 30px; border-radius: 4px;" />
+            AQ DMCT
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                Home Page
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="mapview">
+                Map View
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="longterm-analysis">
+                Long Term Analysis
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="airquality">
+                Live API downloads
+            </NavLink>
+        </div>
+    </nav>
+</div>

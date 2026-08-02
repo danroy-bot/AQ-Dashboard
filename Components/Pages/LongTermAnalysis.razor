@@ -1,0 +1,453 @@
+@page "/longterm-analysis"
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@inject AQ_Dashboard.Services.AppConfig Config
+@using AQ_Dashboard.Services
+
+<PageTitle>Long Term Analysis</PageTitle>
+
+<div style="display: flex; flex-direction: column; height: calc(100vh - 50px); overflow: hidden; padding: 10px;">
+
+    <!-- Header -->
+    <h3 style="color: #758A64; font-weight: bold; font-size: 20px; margin: 0 0 4px 0;">Long Term Analysis — Gladstone (2024)</h3>
+    <p style="font-size: 12px; color: #6c757d; margin: 0 0 10px 0;">
+        A full year of historical air quality and meteorological data for Gladstone, with advanced per-pollutant diagnostics.
+    </p>
+
+    @if (!dataAvailable)
+    {
+        <div style="background: #fff5f5; border: 1px solid #f5c6cb; color: #dc3545; border-radius: 6px; padding: 15px; font-size: 13px;">
+            Could not find long-term data at <strong>@Config.LongTermAqDataPath</strong>. Check the path in appsettings.json.
+        </div>
+    }
+    else
+    {
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;">
+
+            <!-- Data Summary -->
+            <div>
+                <div style="font-weight: 600; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">Data Summary</div>
+                <div style="display: flex; gap: 12px; align-items: stretch;">
+                    <div style="width: 320px; min-width: 320px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center;">
+                        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; align-self: flex-start;">Annual Wind Rose</div>
+                        <div id="annualWindrose" style="flex: 1; display: flex; align-items: center; justify-content: center;"></div>
+                    </div>
+
+                    <div style="flex: 1; background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                        <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">Monthly Averages</div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                            @foreach (var p in paramDefs)
+                            {
+                                <div style="height: 160px; position: relative;">
+                                    <canvas id="monthly-@p.Key"></canvas>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced Analysis -->
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; font-size: 14px; color: #2c3e50;">Advanced Analysis</div>
+                    <select @bind="advancedParamKey" @bind:after="OnAdvancedParameterChanged"
+                            style="padding: 5px 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; min-width: 140px;">
+                        @foreach (var p in paramDefs)
+                        {
+                            <option value="@p.Key">@p.Key</option>
+                        }
+                    </select>
+                    <div style="font-size: 11px; color: #adb5bd;">Select a pollutant to analyse in detail</div>
+                </div>
+
+                <!-- Pollution Rose | Month x Hour Heatmap | Diurnal (Hourly) Profile -->
+                <div style="display: flex; gap: 12px; align-items: stretch; margin-bottom: 14px;">
+                    <div style="width: 320px; min-width: 320px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center;">
+                        <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px; align-self: flex-start;">
+                            Pollution Rose — @PollutantFormatter.Format(AdvancedDef.Key) <span style="font-weight: 400; color: #adb5bd;">(annual)</span>
+                        </div>
+                        <div id="pollutionRose" style="flex: 1; display: flex; align-items: center; justify-content: center;"></div>
+                    </div>
+
+                    <div style="flex: 3; min-width: 480px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;">
+                        <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">
+                            Month × Hour Heatmap — @PollutantFormatter.Format(AdvancedDef.Key)
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <div style="display: flex; flex-direction: column; width: 100%;">
+                                <div style="display: flex;">
+                                    <div style="width: 32px; flex-shrink: 0;"></div>
+                                    @for (int h = 0; h < 24; h++)
+                                    {
+                                        <div style="flex: 1; font-size: 8px; text-align: center; color: #adb5bd;">@(h % 3 == 0 ? h.ToString() : "")</div>
+                                    }
+                                </div>
+                                @for (int m = 0; m < 12; m++)
+                                {
+                                    var mi = m;
+                                    <div style="display: flex; align-items: center;">
+                                        <div style="width: 32px; flex-shrink: 0; font-size: 10px; color: #4a5568;">@monthLabels[mi]</div>
+                                        @for (int h = 0; h < 24; h++)
+                                        {
+                                            var hi = h;
+                                            var val = heatmapValues[mi, hi];
+                                            var color = SpectrumGradient(heatmapMax > 0 ? val / heatmapMax : 0);
+                                            <div style="flex: 1; height: 16px; background: @color;"
+                                                 title="@($"{monthLabels[mi]} {hi:00}:00 — {val:F3} {AdvancedDef.Units}")"></div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="flex: 1; min-width: 180px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; min-height: 0;">
+                        <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">Diurnal Profile — @PollutantFormatter.Format(AdvancedDef.Key) <span style="font-weight: 400; color: #adb5bd;">(hourly)</span></div>
+                        <div style="flex: 1; min-height: 0; position: relative;">
+                            <canvas id="diurnalChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 24-Hour Average Trend -->
+                <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                        <div style="font-weight: 600; font-size: 13px;">24-Hour Average Trend — @PollutantFormatter.Format(AdvancedDef.Key)</div>
+                        @if (guidelines.TryGetValue(advancedParamKey, out var g24) && g24.Daily24hr.HasValue)
+                        {
+                            <div style="font-size: 10px; color: #800000; display: flex; align-items: center; gap: 4px;">
+                                <span style="display:inline-block; width:14px; border-top:2px dashed #800000;"></span>
+                                QLD/NEPM 24-hr Guideline (@g24.Daily24hr.Value.ToString("F3") @AdvancedDef.Units)
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="font-size: 10px; color: #adb5bd;">No QLD/NEPM ambient guideline for this pollutant</div>
+                        }
+                    </div>
+                    <div style="height: 190px; position: relative;">
+                        <canvas id="trend24h"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics -->
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 10px; color: #2c3e50;">Statistics</div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="text-align: left; color: #6c757d; border-bottom: 2px solid #e2e8f0;">
+                                <th style="padding: 6px 8px;">Parameter</th>
+                                <th style="padding: 6px 8px;">Mean</th>
+                                <th style="padding: 6px 8px;">Median</th>
+                                <th style="padding: 6px 8px;">Max</th>
+                                <th style="padding: 6px 8px;">Min</th>
+                                <th style="padding: 6px 8px;">Availability</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in paramDefs)
+                            {
+                                var s = statsByParam[p.Key];
+                                <tr style="border-bottom: 1px solid #f0f0f0;">
+                                    <td style="padding: 6px 8px; font-weight: 600;">@PollutantFormatter.Format(p.Key) <span style="font-weight: 400; color: #adb5bd;">(@p.Units)</span></td>
+                                    <td style="padding: 6px 8px;">@s.Mean.ToString("F3")</td>
+                                    <td style="padding: 6px 8px;">@s.Median.ToString("F3")</td>
+                                    <td style="padding: 6px 8px;">@s.Max.ToString("F3")</td>
+                                    <td style="padding: 6px 8px;">@s.Min.ToString("F3")</td>
+                                    <td style="padding: 6px 8px;">@s.AvailabilityPercent.ToString("F0")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string ThemeColor = "#758A64";
+
+    private record ParamDef(string Key, string Units, Func<LongTermAqRecord, double?> Selector);
+
+    private List<ParamDef> paramDefs = new()
+    {
+        new("PM10", "µg/m³", r => r.PM10),
+        new("PM2.5", "µg/m³", r => r.PM25),
+        new("NOx", "ppm", r => r.NOx),
+        new("NO2", "ppm", r => r.NO2),
+        new("NO", "ppm", r => r.NO),
+        new("SO2", "ppm", r => r.SO2),
+    };
+
+    // NOx and NO have no dedicated NEPM standard, hence the null entries.
+    private Dictionary<string, (double? Hourly, double? Daily24hr)> guidelines = new()
+    {
+        { "PM10", (null, 50.0) },
+        { "PM2.5", (null, 25.0) },
+        { "SO2", (0.20, 0.08) },
+        { "NO2", (0.12, null) },
+        { "NO", (null, null) },
+        { "NOx", (null, null) },
+    };
+
+    private static readonly string[] monthLabels = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+    private bool dataAvailable = false;
+    private List<LongTermAqRecord> records = new();
+    private Dictionary<string, DataStats> statsByParam = new();
+
+    private string advancedParamKey = "PM10";
+    private ParamDef AdvancedDef => paramDefs.First(p => p.Key == advancedParamKey);
+
+    private double[] pollutionRoseDirections = Enumerable.Range(0, 16).Select(i => i * 22.5).ToArray();
+    private const int PollutionRoseBinCount = 6;
+    private double[][] pollutionRoseBins = Enumerable.Range(0, 16).Select(_ => new double[PollutionRoseBinCount]).ToArray();
+    private string[] pollutionRoseBinLabels = new string[PollutionRoseBinCount];
+
+    private double[] diurnalValues = new double[24];
+
+    private string[] trend24hLabels = Array.Empty<string>();
+    private double[] trend24hValues = Array.Empty<double>();
+
+    private double[,] heatmapValues = new double[12, 24];
+    private double heatmapMax;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            records = LongTermAqDataLoader.LoadRecords(Config.LongTermAqDataPath);
+            dataAvailable = records.Count > 0;
+
+            if (dataAvailable)
+            {
+                RecomputeStats();
+                RecomputeAdvanced();
+                StateHasChanged();
+                await Task.Delay(200);
+                await RenderCharts();
+                await RenderAdvancedCharts();
+            }
+        }
+    }
+
+    private async Task OnAdvancedParameterChanged()
+    {
+        RecomputeAdvanced();
+        StateHasChanged();
+        await Task.Delay(100);
+        await RenderAdvancedCharts();
+    }
+
+    private void RecomputeAdvanced()
+    {
+        var def = AdvancedDef;
+
+        var concValues = records.Select(def.Selector).Where(v => v.HasValue).Select(v => v!.Value).ToList();
+        double maxConc = concValues.Count > 0 ? concValues.Max() : 0;
+        double binWidth = maxConc > 0 ? maxConc / PollutionRoseBinCount : 1;
+
+        var binCounts = new int[16, PollutionRoseBinCount];
+        int totalValid = 0;
+        foreach (var r in records)
+        {
+            var val = def.Selector(r);
+            if (!val.HasValue || !r.WindDirection.HasValue) continue;
+            int dirIdx = (int)Math.Round(r.WindDirection.Value / 22.5) % 16;
+            int binIdx = maxConc > 0 ? Math.Min((int)(val.Value / binWidth), PollutionRoseBinCount - 1) : 0;
+            binCounts[dirIdx, binIdx]++;
+            totalValid++;
+        }
+
+        pollutionRoseBins = new double[16][];
+        for (int d = 0; d < 16; d++)
+        {
+            pollutionRoseBins[d] = new double[PollutionRoseBinCount];
+            for (int b = 0; b < PollutionRoseBinCount; b++)
+                pollutionRoseBins[d][b] = totalValid > 0 ? binCounts[d, b] * 100.0 / totalValid : 0;
+        }
+
+        pollutionRoseBinLabels = new string[PollutionRoseBinCount];
+        for (int b = 0; b < PollutionRoseBinCount; b++)
+            pollutionRoseBinLabels[b] = $"{(b * binWidth):F2}-{((b + 1) * binWidth):F2}";
+
+        var hourSums = new double[24];
+        var hourCounts = new int[24];
+        foreach (var r in records)
+        {
+            var val = def.Selector(r);
+            if (!val.HasValue) continue;
+            hourSums[r.Timestamp.Hour] += val.Value;
+            hourCounts[r.Timestamp.Hour]++;
+        }
+        diurnalValues = new double[24];
+        for (int h = 0; h < 24; h++)
+            diurnalValues[h] = hourCounts[h] > 0 ? hourSums[h] / hourCounts[h] : 0;
+
+        var dailyGroups = records
+            .Where(r => def.Selector(r).HasValue)
+            .GroupBy(r => r.Timestamp.Date)
+            .OrderBy(g => g.Key)
+            .ToList();
+        trend24hLabels = dailyGroups.Select(g => g.Key.ToString("dd-MMM")).ToArray();
+        trend24hValues = dailyGroups.Select(g => g.Average(r => def.Selector(r)!.Value)).ToArray();
+
+        var cellSums = new double[12, 24];
+        var cellCounts = new int[12, 24];
+        foreach (var r in records)
+        {
+            var val = def.Selector(r);
+            if (!val.HasValue) continue;
+            int m = r.Timestamp.Month - 1;
+            int h = r.Timestamp.Hour;
+            cellSums[m, h] += val.Value;
+            cellCounts[m, h]++;
+        }
+        heatmapValues = new double[12, 24];
+        heatmapMax = 0;
+        for (int m = 0; m < 12; m++)
+        {
+            for (int h = 0; h < 24; h++)
+            {
+                var avg = cellCounts[m, h] > 0 ? cellSums[m, h] / cellCounts[m, h] : 0;
+                heatmapValues[m, h] = avg;
+                if (avg > heatmapMax) heatmapMax = avg;
+            }
+        }
+    }
+
+    private async Task RenderAdvancedCharts()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("chartInterop.createPollutionRose",
+                "pollutionRose", pollutionRoseDirections, pollutionRoseBins, pollutionRoseBinLabels, AdvancedDef.Units);
+
+            guidelines.TryGetValue(advancedParamKey, out var g);
+
+            var hourLabels = Enumerable.Range(0, 24).Select(h => h.ToString()).ToArray();
+            await JS.InvokeVoidAsync("chartInterop.createNamedChart",
+                "diurnalChart", "bar", hourLabels, diurnalValues, AdvancedDef.Key, AdvancedDef.Units, ThemeColor);
+
+            await JS.InvokeVoidAsync("chartInterop.createNamedChart",
+                "trend24h", "line", trend24hLabels, trend24hValues, AdvancedDef.Key, AdvancedDef.Units, ThemeColor,
+                g.Daily24hr, "QLD/NEPM 24-hr Guideline");
+        }
+        catch { }
+    }
+
+    private static readonly (double T, int R, int G, int B)[] SpectrumStops =
+    {
+        (0.0, 49, 54, 149),
+        (0.2, 116, 173, 209),
+        (0.4, 171, 221, 164),
+        (0.6, 254, 224, 139),
+        (0.8, 253, 174, 97),
+        (1.0, 215, 48, 39),
+    };
+
+    private static string SpectrumGradient(double t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        for (int i = 0; i < SpectrumStops.Length - 1; i++)
+        {
+            var (t0, r0, g0, b0) = SpectrumStops[i];
+            var (t1, r1, g1, b1) = SpectrumStops[i + 1];
+            if (t >= t0 && t <= t1)
+            {
+                double frac = (t1 - t0) > 0 ? (t - t0) / (t1 - t0) : 0;
+                int r = (int)(r0 + (r1 - r0) * frac);
+                int g = (int)(g0 + (g1 - g0) * frac);
+                int b = (int)(b0 + (b1 - b0) * frac);
+                return $"#{r:X2}{g:X2}{b:X2}";
+            }
+        }
+        var last = SpectrumStops[^1];
+        return $"#{last.R:X2}{last.G:X2}{last.B:X2}";
+    }
+
+    private void RecomputeStats()
+    {
+        foreach (var p in paramDefs)
+        {
+            var values = records.Select(p.Selector).Where(v => v.HasValue).Select(v => v!.Value).ToList();
+
+            statsByParam[p.Key] = new DataStats
+            {
+                TotalCount = records.Count,
+                ValidCount = values.Count,
+                AvailabilityPercent = records.Count > 0 ? values.Count * 100.0 / records.Count : 0,
+                Mean = Mean(values),
+                Median = Median(values),
+                Max = values.Count > 0 ? values.Max() : 0,
+                Min = values.Count > 0 ? values.Min() : 0,
+            };
+        }
+    }
+
+    private async Task RenderCharts()
+    {
+        var monthLabelsLocal = new[] { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+        foreach (var p in paramDefs)
+        {
+            var monthValues = new double[12];
+            for (int m = 1; m <= 12; m++)
+            {
+                var monthVals = records
+                    .Where(r => r.Timestamp.Month == m && p.Selector(r).HasValue)
+                    .Select(r => p.Selector(r)!.Value)
+                    .ToList();
+                monthValues[m - 1] = monthVals.Count > 0 ? monthVals.Average() : 0;
+            }
+
+            try
+            {
+                await JS.InvokeVoidAsync("chartInterop.createNamedChart",
+                    $"monthly-{p.Key}", "bar", monthLabelsLocal, monthValues, p.Key, p.Units, ThemeColor);
+            }
+            catch { }
+        }
+
+        var windPairs = records
+            .Where(r => r.WindSpeed.HasValue && r.WindDirection.HasValue)
+            .ToList();
+
+        if (windPairs.Count > 0)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("chartInterop.createWindroseChart",
+                    "annualWindrose",
+                    windPairs.Select(r => r.WindSpeed).ToArray(),
+                    windPairs.Select(r => r.WindDirection).ToArray());
+            }
+            catch { }
+        }
+    }
+
+    private static double Mean(List<double> vals) => vals.Count > 0 ? vals.Average() : 0;
+
+    private static double Median(List<double> vals)
+    {
+        if (vals.Count == 0) return 0;
+        var sorted = vals.OrderBy(v => v).ToList();
+        int mid = sorted.Count / 2;
+        return sorted.Count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2.0 : sorted[mid];
+    }
+
+    public class DataStats
+    {
+        public int TotalCount { get; set; }
+        public int ValidCount { get; set; }
+        public double AvailabilityPercent { get; set; }
+        public double Mean { get; set; }
+        public double Median { get; set; }
+        public double Max { get; set; }
+        public double Min { get; set; }
+    }
+}

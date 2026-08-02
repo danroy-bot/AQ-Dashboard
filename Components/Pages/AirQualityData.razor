@@ -1,0 +1,538 @@
+@page "/airquality"
+@rendermode InteractiveServer
+@using AQ_Dashboard.Services
+@inject IJSRuntime JS
+
+<PageTitle>Live Queensland Air Quality</PageTitle>
+
+<div style="display: flex; flex-direction: column; height: calc(100vh - 50px); overflow: hidden; padding: 10px;">
+
+    <!-- Header -->
+    <h3 style="color: #758A64; font-weight: bold; font-size: 20px; margin: 0 0 2px 0;">Live Queensland, Australia Air Quality and Meteorological Data (retrieved from QLD GOV API)</h3>
+    <p style="font-size: 12px; color: #6c757d; margin: 0 0 8px 0;">
+        Live meteorological and air quality readings pulled directly from Queensland Government monitoring stations.
+    </p>
+
+    <!-- Controls Row -->
+    <div style="display: flex; align-items: center; gap: 15px; font-size: 13px; background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 15px; margin-bottom: 10px;">
+
+        <div>
+                <div style="font-weight: 600; margin-bottom: 4px;">Monitoring Station</div>
+            <select @bind="selectedStation" @bind:after="OnStationChanged" style="padding: 5px 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; min-width: 180px;">
+                    @foreach (var station in stations)
+                    {
+                        <option value="@station.Key">@station.Value</option>
+                    }
+                </select>
+        </div>
+
+        <div style="width: 1px; background: #ccc; align-self: stretch;"></div>
+
+        <div>
+            <div style="font-weight: 600; margin-bottom: 4px;">Parameter</div>
+            <select @bind="selectedParameter" @bind:after="OnParameterChanged"
+                    disabled="@(availableParameters.Count == 0)"
+                    style="padding: 5px 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; min-width: 120px;
+                opacity: @(availableParameters.Count > 0 ? "1" : "0.5");">
+                @if (availableParameters.Count > 0)
+                {
+                    @foreach (var p in availableParameters)
+                    {
+                        <option value="@p">@p</option>
+                    }
+                }
+                else
+                {
+                    <option value="">Fetch data first</option>
+                }
+            </select>
+        </div>
+
+        <div style="width: 1px; background: #ccc; align-self: stretch;"></div>
+
+        <div style="display: flex; align-items: flex-end; gap: 8px; padding-top: 16px;">
+            <button @onclick="FetchData" disabled="@isLoading"
+                    style="background: #758A64; color: white; border: none; padding: 7px 20px; font-size: 13px; font-weight: 600; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                @(isLoading ? "Fetching..." : "Fetch Data")
+            </button>
+            <button @onclick="ExportData" disabled="@(filteredReadings.Count == 0)"
+                    style="background: #6c757d; color: white; border: none; padding: 7px 20px; font-size: 13px; font-weight: 600; border-radius: 4px; cursor: pointer; white-space: nowrap;
+                opacity: @(filteredReadings.Count > 0 ? "1" : "0.5");">
+                Export CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div style="flex: 1; display: flex; gap: 10px; min-height: 0; overflow: hidden;">
+
+        <!-- Chart and Windrose Area -->
+        <div style="flex: 2; display: flex; flex-direction: column; gap: 10px; min-height: 0;">
+
+            <!-- Time Series Chart -->
+            <div style="flex: 1; background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; display: flex; flex-direction: column; min-height: 0;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px;">
+                    @(string.IsNullOrEmpty(selectedParameter) ? new Microsoft.AspNetCore.Components.MarkupString("Select a station") : PollutantFormatter.Format(selectedParameter)) at @(stations.ContainsKey(selectedStation) ? stations[selectedStation] : "—") (Last 3 Days)
+                    @if (!string.IsNullOrEmpty(currentUnits))
+                    {
+                        <span style="font-weight: 400; color: #6c757d;"> (@currentUnits)</span>
+                    }
+                </div>
+
+                @if (isLoading)
+                {
+                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #6c757d;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 20px; margin-bottom: 8px;">Loading...</div>
+                            <div style="font-size: 13px;">Fetching data from QLD Government API</div>
+                        </div>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #dc3545;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 16px; margin-bottom: 8px;">Error</div>
+                            <div style="font-size: 13px;">@errorMessage</div>
+                        </div>
+                    </div>
+                }
+                else if (filteredReadings.Count == 0)
+                {
+                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #adb5bd;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 16px; margin-bottom: 8px;">No Data Loaded</div>
+                            <div style="font-size: 13px;">Select a station then click Fetch Data</div>
+                        </div>
+                    </div>
+                }
+
+                <div style="flex: 1; min-height: 0; position: relative; @(filteredReadings.Count > 0 && !isLoading ? "" : "display: none;")">
+                    <canvas id="aqChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Wind Rose -->
+            <div style="height: 320px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; align-self: flex-start;">
+                    Wind Rose — @(stations.ContainsKey(selectedStation) ? stations[selectedStation] : "—") (Last 3 Days)
+                </div>
+
+                @if (isLoading)
+                {
+                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #6c757d;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 20px; margin-bottom: 8px;">Loading...</div>
+                            <div style="font-size: 13px;">Fetching wind data</div>
+                        </div>
+                    </div>
+                }
+                else if (!hasWindData)
+                {
+                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #adb5bd; font-size: 13px;">
+                        No wind data available
+                    </div>
+                }
+
+                <div id="aqWindrose" style="flex: 1; display: @(!isLoading && hasWindData ? "flex" : "none"); align-items: center; justify-content: center;"></div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div style="width: 300px; min-width: 300px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto;">
+
+            <!-- Current Measurements Card -->
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 10px; color: #2c3e50;">
+                    Current Measurements
+                </div>
+                @if (currentMeasurements.Count > 0)
+                {
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        @foreach (var m in currentMeasurements)
+                        {
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: #f8f9fa; border-radius: 4px; cursor: pointer;
+                                border-left: 3px solid @(m.Abbreviation == selectedParameter ? "#758A64" : "transparent");"
+                                 @onclick="() => SwitchParameter(m.Abbreviation)">
+                                <div>
+                                    <div style="font-size: 13px; font-weight: 600; color: #2c3e50;">@PollutantFormatter.Format(m.Abbreviation)</div>
+                                    <div style="font-size: 10px; color: #adb5bd;">@m.Units</div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-size: 16px; font-weight: 700; color: @GetValueColor(m.Value);">
+                                        @(m.Value.HasValue ? m.Value.Value.ToString("F1") : "—")
+                                    </div>
+                                    <div style="font-size: 9px; color: #adb5bd;">@FormatTimestamp(m.Timestamp)</div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div style="font-size: 12px; color: #adb5bd; text-align: center; padding: 10px;">
+                        No data loaded
+                    </div>
+                }
+            </div>
+
+            <!-- Statistics Card -->
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 10px; color: #2c3e50;">
+                    Statistics — @PollutantFormatter.Format(selectedParameter)
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 8px; text-align: center;">
+                        <div style="font-size: 10px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px;">Mean</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #2c3e50;">@(filteredReadings.Count > 0 ? stats.Mean.ToString("F2") : "—")</div>
+                    </div>
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 8px; text-align: center;">
+                        <div style="font-size: 10px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px;">Max</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #dc3545;">@(filteredReadings.Count > 0 ? stats.Max.ToString("F2") : "—")</div>
+                    </div>
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 8px; text-align: center;">
+                        <div style="font-size: 10px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px;">Min</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #28a745;">@(filteredReadings.Count > 0 ? stats.Min.ToString("F2") : "—")</div>
+                    </div>
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 8px; text-align: center;">
+                        <div style="font-size: 10px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px;">Records</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #2c3e50;">@filteredReadings.Count</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Source Card -->
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px;">
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #2c3e50;">Data Source</div>
+                <div style="font-size: 12px; color: #6c757d; line-height: 1.6;">
+                    Queensland Government Department of Environment and Science — Air Quality Monitoring Network
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Popup -->
+@if (showPopup)
+{
+    <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4);
+        display: flex; align-items: center; justify-content: center; z-index: 9999;"
+         @onclick="() => showPopup = false">
+        <div style="background: white; padding: 30px 40px; border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3); text-align: center; max-width: 400px;"
+             @onclick:stopPropagation="true">
+            <h4 style="margin: 0 0 10px 0; color: #2c3e50;">@popupTitle</h4>
+            <p style="color: #666; margin: 0 0 20px 0;">@popupMessage</p>
+            <button @onclick="() => showPopup = false"
+                    style="background: #758A64; color: white; border: none; padding: 8px 24px;
+                font-size: 14px; font-weight: 600; border-radius: 4px; cursor: pointer;">
+                OK
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject] private QldAirQualityService AqService { get; set; } = default!;
+
+    private Dictionary<string, string> stations = new()
+    {
+        { "qal", "South Gladstone" },
+        { "cga", "Auckland Point" },
+        { "cbd", "Brisbane CBD" }
+    };
+
+    private string selectedStation = "qal";
+    private string selectedParameter = "";
+    private bool isLoading = false;
+    private string errorMessage = "";
+    private string currentUnits = "";
+    private bool hasWindData = false;
+    private bool chartRendered = false;
+
+    // Popup
+    private bool showPopup = false;
+    private string popupTitle = "";
+    private string popupMessage = "";
+
+    // Data
+    private List<AirQualityReading> allReadings = new();
+    private List<AirQualityReading> filteredReadings = new();
+    private List<string> availableParameters = new();
+    private List<CurrentMeasurement> currentMeasurements = new();
+    private DataStats stats = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Auto-select South Gladstone + PM10 and fetch on page load
+            selectedStation = "qal";
+            await FetchData();
+        }
+    }
+
+    private async Task FetchData()
+    {
+        // Destroy chart before changing state
+        if (chartRendered)
+        {
+            try { await JS.InvokeVoidAsync("chartInterop.destroyChart"); } catch { }
+            chartRendered = false;
+        }
+
+        isLoading = true;
+        errorMessage = "";
+        filteredReadings = new();
+        currentMeasurements = new();
+        availableParameters = new();
+        hasWindData = false;
+        stats = new DataStats();
+        StateHasChanged();
+
+        try
+        {
+            allReadings = await AqService.FetchStationDataAsync(selectedStation, 1);
+
+            availableParameters = allReadings
+                .Select(r => r.Abbreviation)
+                .Distinct()
+                .OrderBy(a => a)
+                .ToList();
+
+            if (availableParameters.Count > 0 && !availableParameters.Contains(selectedParameter))
+            {
+                selectedParameter = availableParameters.Contains("PM10") ? "PM10" : availableParameters[0];
+            }
+
+            BuildCurrentMeasurements();
+            ApplyParameterFilter();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error fetching data: {ex.Message}";
+        }
+
+        isLoading = false;
+        StateHasChanged();
+
+        // Render charts after DOM is stable
+        if (filteredReadings.Count > 0)
+        {
+            await Task.Delay(500);
+            await RenderCharts();
+        }
+    }
+
+    private void ApplyParameterFilter()
+    {
+        filteredReadings = allReadings
+            .Where(r => r.Abbreviation == selectedParameter && r.Value.HasValue)
+            .OrderBy(r => r.Timestamp)
+            .ToList();
+
+        currentUnits = filteredReadings.FirstOrDefault()?.Units ?? "";
+
+        if (filteredReadings.Count > 0)
+        {
+            var values = filteredReadings.Select(r => r.Value!.Value).ToList();
+            stats.Mean = values.Average();
+            stats.Max = values.Max();
+            stats.Min = values.Min();
+        }
+        else
+        {
+            stats = new DataStats();
+        }
+    }
+
+    private void BuildCurrentMeasurements()
+    {
+        var displayParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "PM10", "PM2.5", "SO2", "SO₂",
+            "TEMP", "Temp", "Temperature",
+            "WS", "Wind Speed",
+            "WD", "Wind Direction",
+            "RAIN", "Rainfall", "Rain"
+        };
+
+        currentMeasurements = allReadings
+            .Where(r => displayParameters.Any(dp =>
+                r.Abbreviation.Equals(dp, StringComparison.OrdinalIgnoreCase)))
+            .GroupBy(r => r.Abbreviation)
+            .Select(g =>
+            {
+                var latest = g.OrderByDescending(r => r.Timestamp).First();
+                return new CurrentMeasurement
+                {
+                    Abbreviation = g.Key,
+                    Value = latest.Value,
+                    Units = latest.Units,
+                    Timestamp = latest.Timestamp
+                };
+            })
+            .OrderBy(m => GetParameterSortOrder(m.Abbreviation))
+            .ToList();
+    }
+
+    private async Task RenderCharts()
+    {
+        try { await JS.InvokeVoidAsync("chartInterop.destroyChart"); } catch { }
+
+        if (filteredReadings.Count > 0)
+        {
+            var labels = filteredReadings.Select(r => FormatTimestamp(r.Timestamp)).ToArray();
+            var values = filteredReadings.Select(r => r.Value!.Value).ToArray();
+            var color = GetParameterColor(selectedParameter);
+
+            try
+            {
+                await JS.InvokeVoidAsync("chartInterop.createTimeSeriesChart",
+                    "aqChart", labels, values, selectedParameter, currentUnits, color);
+                chartRendered = true;
+            }
+            catch { }
+        }
+
+        await DrawWindrose();
+    }
+
+    private async Task DrawWindrose()
+    {
+        var wsAbbreviations = new[] { "WS", "Wind Speed", "ws" };
+        var wdAbbreviations = new[] { "WD", "Wind Direction", "wd" };
+
+        var wsReadings = allReadings
+            .Where(r => wsAbbreviations.Any(a => r.Abbreviation.Equals(a, StringComparison.OrdinalIgnoreCase)) && r.Value.HasValue)
+            .OrderBy(r => r.Timestamp)
+            .ToList();
+
+        var wdReadings = allReadings
+            .Where(r => wdAbbreviations.Any(a => r.Abbreviation.Equals(a, StringComparison.OrdinalIgnoreCase)) && r.Value.HasValue)
+            .OrderBy(r => r.Timestamp)
+            .ToList();
+
+        hasWindData = wsReadings.Count > 0 && wdReadings.Count > 0;
+        StateHasChanged();
+
+        if (!hasWindData) return;
+
+        var wdByTimestamp = wdReadings.ToDictionary(r => r.Timestamp, r => r.Value!.Value);
+        var speeds = new List<double?>();
+        var directions = new List<double?>();
+
+        foreach (var ws in wsReadings)
+        {
+            if (wdByTimestamp.TryGetValue(ws.Timestamp, out var dir))
+            {
+                speeds.Add(ws.Value);
+                directions.Add(dir);
+            }
+        }
+
+        if (speeds.Count > 0)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("chartInterop.createWindroseChart",
+                    "aqWindrose", speeds.ToArray(), directions.ToArray());
+            }
+            catch { }
+        }
+    }
+
+    private async Task OnStationChanged()
+    {
+        await FetchData();
+    }
+
+    private async Task OnParameterChanged()
+    {
+        if (allReadings.Count == 0) return;
+
+        ApplyParameterFilter();
+        StateHasChanged();
+
+        await Task.Delay(300);
+        await RenderCharts();
+    }
+
+    private async Task SwitchParameter(string parameter)
+    {
+        selectedParameter = parameter;
+        ApplyParameterFilter();
+        StateHasChanged();
+
+        await Task.Delay(300);
+        await RenderCharts();
+    }
+
+    private int GetParameterSortOrder(string abbreviation)
+    {
+        return abbreviation.ToUpper() switch
+        {
+            "PM10" => 1,
+            "PM2.5" => 2,
+            "SO2" or "SO₂" => 3,
+            "TEMP" or "TEMPERATURE" => 4,
+            "WS" or "WIND SPEED" => 5,
+            "WD" or "WIND DIRECTION" => 6,
+            "RAIN" or "RAINFALL" => 7,
+            _ => 99
+        };
+    }
+
+    private string FormatTimestamp(string timestamp)
+    {
+        if (DateTime.TryParse(timestamp, out var dt))
+            return dt.ToString("dd/MM HH:mm");
+        return timestamp;
+    }
+
+    private string GetValueColor(double? value)
+    {
+        if (!value.HasValue) return "#adb5bd";
+        return "#2c3e50";
+    }
+
+    private string GetParameterColor(string parameter)
+    {
+        return parameter switch
+        {
+            "PM10" => "#e67e22",
+            "PM2.5" => "#e74c3c",
+            "SO2" or "SO₂" => "#9b59b6",
+            "NO2" or "NO₂" => "#2ecc71",
+            "O3" or "O₃" => "#3498db",
+            "CO" => "#34495e",
+            "WS" or "Wind Speed" => "#1abc9c",
+            "WD" or "Wind Direction" => "#f39c12",
+            "TEMP" or "Temp" or "Temperature" => "#e74c3c",
+            "RH" => "#3498db",
+            _ => "#758A64"
+        };
+    }
+
+    private void ExportData()
+    {
+        popupTitle = "Coming Soon";
+        popupMessage = "CSV export feature is still in production.";
+        showPopup = true;
+    }
+
+    public class CurrentMeasurement
+    {
+        public string Abbreviation { get; set; } = "";
+        public double? Value { get; set; }
+        public string Units { get; set; } = "";
+        public string Timestamp { get; set; } = "";
+    }
+
+    public class DataStats
+    {
+        public double Mean { get; set; }
+        public double Max { get; set; }
+        public double Min { get; set; }
+    }
+}
