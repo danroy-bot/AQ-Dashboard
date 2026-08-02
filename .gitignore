@@ -11,7 +11,3 @@ publish/
 .DS_Store
 Thumbs.db
 
-## Local-only data and third-party branding, not for the public repo
-Data/
-wwwroot/images/AED_Logo*
-wwwroot/images/BSL_Logo*

@@ -5,8 +5,8 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$gridDir = Join-Path $root "SampleData\Grids"
-$metPath = Join-Path $root "SampleData\MetData.csv"
+$gridDir = Join-Path $root "Data\Grids"
+$metPath = Join-Path $root "Data\MetData.csv"
 
 New-Item -ItemType Directory -Force -Path $gridDir | Out-Null
 
@@ -91,7 +91,7 @@ foreach ($p in $pollutants) {
     $maxData = New-PlumeGrid -Cols $cols -Rows $rows -Peak $p.Peak `
         -CenterColFrac 0.55 -CenterRowFrac 0.45 -SpreadCol 6.0 -SpreadRow 8.0
 
-    $maxPath = Join-Path $gridDir "$($p.Prefix)_AED_Max.grd"
+    $maxPath = Join-Path $gridDir "$($p.Prefix)_Temp_Max.grd"
     Write-DsaaFile -Path $maxPath -Cols $cols -Rows $rows `
         -XMin $xMin -XMax $xMax -YMin $yMin -YMax $yMax `
         -Data $maxData -ZMin 0.0 -ZMax $p.Peak
@@ -107,7 +107,7 @@ foreach ($p in $pollutants) {
         $stepData = New-PlumeGrid -Cols $cols -Rows $rows -Peak $peak `
             -CenterColFrac $centerCol -CenterRowFrac $centerRow -SpreadCol 5.0 -SpreadRow 7.0
 
-        $stepPath = Join-Path $gridDir "$($p.Prefix)_AED_Timestep_$($t.ToString('000')).grd"
+        $stepPath = Join-Path $gridDir "$($p.Prefix)_Temp_Timestep_$($t.ToString('000')).grd"
         Write-DsaaFile -Path $stepPath -Cols $cols -Rows $rows `
             -XMin $xMin -XMax $xMax -YMin $yMin -YMax $yMax `
             -Data $stepData -ZMin 0.0 -ZMax $p.Peak
