@@ -27,7 +27,7 @@ Opens at `http://localhost:5180` by default.
 Map View and Long Term Analysis read from a `Data/` folder (grid files, met data, and a
 long-term CSV — paths configured in `appsettings.json`). Example data included in this repo. 
 
-Long Term Analysis expects its own hourly CSV -also included in this 
+Long Term Analysis expects its own hourly CSV -also included in this repo.
 
 The live API page doesn't need any of this; it talks to QLD Government's public API
 directly.
