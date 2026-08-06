@@ -25,16 +25,9 @@ Opens at `http://localhost:5180` by default.
 ## Data
 
 Map View and Long Term Analysis read from a `Data/` folder (grid files, met data, and a
-long-term CSV — paths configured in `appsettings.json`). That folder isn't part of this
-repo. To get Map View working locally, generate a synthetic grid/met dataset with:
+long-term CSV — paths configured in `appsettings.json`). Example data included in this repo. 
 
-```powershell
-scripts/generate-sample-data.ps1
-```
-
-Long Term Analysis expects its own hourly CSV at the path set in `appsettings.json`
-under `AppConfig:LongTermAqDataPath` — point that at any file with the same column
-layout to try it out.
+Long Term Analysis expects its own hourly CSV -also included in this 
 
 The live API page doesn't need any of this; it talks to QLD Government's public API
 directly.
