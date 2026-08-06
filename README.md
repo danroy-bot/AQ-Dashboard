@@ -1,6 +1,6 @@
 # AQ Dashboard
 
-A Blazor Server examole air quality dashboard: live monitoring data, dispersion-model contour
+A Blazor Server example air quality dashboard: live monitoring data, dispersion-model contour
 visualisation, and a full year of historical per-pollutant analysis.
 
 ## Pages
